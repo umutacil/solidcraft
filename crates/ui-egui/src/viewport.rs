@@ -571,6 +571,8 @@ fn base_scene_key(app: &SolveApp) -> u64 {
     app.session.visibility.hidden_profiles.hash(&mut h);
     app.session.active_component.hash(&mut h);
     app.session.active_occurrence_path.hash(&mut h);
+    crate::dialogs_assembly::joint_focus(app).hash(&mut h);
+    crate::joint_spotlight::bodies(app).hash(&mut h);
     app.preview.effective_replaced().hash(&mut h);
     app.preview.rolled_back.hash(&mut h);
     app.preferences.cosmetic_threads.hash(&mut h);
@@ -683,6 +685,19 @@ pub(crate) fn active_body_names(app: &SolveApp) -> Option<ActiveBodyNames> {
         *cache = Some(ActiveBodies { doc: s.doc.clone(), state, path: path.clone(), names: names.clone() });
     }
     Some(names)
+}
+
+/// The bodies that stay solid while the others fade: the parts of a picked joint, or those of Show
+/// Joints' placement, or else of the active placement ([`active_body_names`]). Picking still goes
+/// by the active placement alone, so a faded body can be clicked to end the view.
+pub(crate) fn solid_bodies(app: &SolveApp) -> Option<ActiveBodyNames> {
+    if let Some(bodies) = crate::joint_spotlight::bodies(app) {
+        return Some(std::sync::Arc::new(bodies.iter().cloned().collect()));
+    }
+    match crate::dialogs_assembly::joint_focus(app) {
+        Some(path) => app.session.occurrence_bodies(path, true).ok().map(|bodies| std::sync::Arc::new(bodies.into_iter().collect())),
+        None => active_body_names(app),
+    }
 }
 
 /// With a component active, bodies outside it are drawn faded.
@@ -1512,7 +1527,7 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
 fn section_outlines(sc: &mut GpuScene, app: &SolveApp, st: &solidcraft_engine::doc::ModelState) {
     let Some((o, n)) = section_plane(app) else { return };
     let s = &app.session;
-    let active_bodies = active_body_names(app);
+    let active_bodies = solid_bodies(app);
     let col = sc.color(c4(Tokens::view().text.gamma_multiply(0.9)));
     let mut kept = app.viewport.section_index.lock().map(|mut k| std::mem::take(&mut *k)).unwrap_or_default();
     let mut made = std::collections::HashMap::with_capacity(kept.len());
@@ -1617,7 +1632,7 @@ fn body_scene(
 ) -> (GpuScene, std::collections::HashMap<u64, CachedBlock>) {
     let tk = Tokens::get();
     let s = &app.session;
-    let active_bodies = active_body_names(app);
+    let active_bodies = solid_bodies(app);
     let (shaded, edges) = match app.ui.visual_style {
         1 => (true, false),
         2 => (false, true),
@@ -4203,7 +4218,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
     let mut sc = GpuScene::with_palette(crate::gpu::Palette::with_stable(body_slots.entries()));
     let st = crate::open_meshing::shown_world(app);
     let s = &app.session;
-    let active_bodies = active_body_names(app);
+    let active_bodies = solid_bodies(app);
     // Whole bodies are lit by drawing the model's own triangles again, but a drag drawn as a layer
     // moves its bodies' triangles on the GPU from where the drag found them: those are built
     // where they stand.
@@ -6373,6 +6388,7 @@ pub(crate) fn select(app: &mut SolveApp, sel: Option<Sel>, add: bool, toggle: bo
         }
         None if !add => {
             let _ = app.run("select.clear", json!({}));
+            crate::dialogs_assembly::leave_joint_focus(app);
         }
         None => {}
     }

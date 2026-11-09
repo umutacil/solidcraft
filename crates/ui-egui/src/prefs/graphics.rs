@@ -378,6 +378,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             });
         });
+        let response = setting::highlight_joint_parts(app, ui).on_hover_text(app.tr("prefs.highlight_joint_parts_help"));
+        crate::scenario::publish_handle("prefs:highlight_joint_parts", response.rect.center());
     });
 }
 

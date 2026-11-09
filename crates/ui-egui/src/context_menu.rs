@@ -976,6 +976,7 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
             item.id = "ui.isolateOccurrence".into();
             item.params = Some(json!({"path": path}));
         }
+        "ui.showJoints" => *item = show_joints(app, path),
         "ui.export" | "ui.saveMesh" | "ui.sendToSlicer" => item.params = Some(json!({"bodies": bodies})),
         "browser.expand_all" | "browser.collapse_all" => item.params = Some(json!({"path": path})),
         _ => {}
@@ -1002,6 +1003,15 @@ fn each_item(items: &mut [Item], f: &mut dyn FnMut(&mut Item)) {
         each_item(&mut item.children, f);
         f(item);
     }
+}
+
+/// Show Joints for a placement, or the way back while it is on.
+fn show_joints(app: &SolveApp, path: &[u64]) -> Item {
+    if app.session.joint_focus() == Some(path) {
+        return act("ui.showJoints", "Stop Showing Joints", "joint").with(json!({}));
+    }
+    let attached = path.last().is_some_and(|o| app.session.doc.attached_joints().contains_key(o));
+    act("ui.showJoints", "Show Joints", "joint").with(json!({ "path": path })).on(attached)
 }
 
 /// "Turn Up Axis": a quarter turn about X of a component's occurrence for a file saved with the
@@ -1147,6 +1157,9 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
         v.push(act("ui.showAll", "Show All Bodies", "eye"));
     }
     v.push(act("ui.isolate", "Isolate", "body").with(json!({ "bodies": names })).on(!bodies.is_empty() && id != 0));
+    if id != 0 {
+        v.push(show_joints(app, &doc.first_path(id)));
+    }
     v.push(Item::sep());
     let mut organize = vec![act("ui.newGroup", "New Group", "folder").with(json!({ "component": id }))];
     if id != 0 {
@@ -1786,6 +1799,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.isolateOccurrence" => {
             let _ = app.run("browser.visibility", json!({"visible": true, "paths": [p["path"]], "isolate": true}));
         }
+        "ui.showJoints" => drop(app.run("joint.focus", p)),
         "ui.canvasVisible" | "ui.canvasLocked" => drop(app.run("canvas.edit", p)),
         "ui.toolbarPin"
         | "ui.toolbarRemove"

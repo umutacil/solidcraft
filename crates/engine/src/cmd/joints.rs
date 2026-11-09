@@ -17,11 +17,11 @@ use super::CommandSpec;
 use crate::params::{bad, bool_, num, str_, vec3};
 use crate::schema::joints::{
     AsBuiltJointParams, CamLift, CamParams, CamResult, ContactStop, CouplingResult, CreateJointParams, DeleteJointParams, DeleteJointResult,
-    DriveJointParams, DriveJointResult, EditJointResult, FloatingChain, GearParams, HeldValue, InspectJointParams, InspectJointResult,
-    JointAddedResult, JointDeleted, JointFrame, JointLimitsParams, JointProblem, LimitSide, LimitStop, LinkInfo, ListJointsParams, ListJointsResult,
-    ListedJoint, ListedOrigin, LoopStop, MakeJointOriginParams, MakeJointOriginResult, MotionLinkParams, NamedValue, OccurrenceDof, RackPinionParams,
-    ReachLoopStop, ReachParams, ReachResult, ReachedJoint, RigidGroupParams, RigidGroupResult, ScrewParams, SolveJointsParams, SolveReport,
-    SolveResult, ValueUnit,
+    DriveJointParams, DriveJointResult, EditJointResult, FloatingChain, FocusJointsParams, FocusJointsResult, GearParams, HeldValue,
+    InspectJointParams, InspectJointResult, JointAddedResult, JointDeleted, JointFrame, JointLimitsParams, JointProblem, LimitSide, LimitStop,
+    LinkInfo, ListJointsParams, ListJointsResult, ListedJoint, ListedOrigin, LoopStop, MakeJointOriginParams, MakeJointOriginResult,
+    MotionLinkParams, NamedValue, OccurrenceDof, RackPinionParams, ReachLoopStop, ReachParams, ReachResult, ReachedJoint, RigidGroupParams,
+    RigidGroupResult, ScrewParams, SolveJointsParams, SolveReport, SolveResult, ValueUnit,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -43,6 +43,7 @@ const GEAR_CONTRACT: TypedContract<GearParams> = TypedContract::new();
 const RACK_PINION_CONTRACT: TypedContract<RackPinionParams> = TypedContract::new();
 const SCREW_CONTRACT: TypedContract<ScrewParams> = TypedContract::new();
 const CAM_CONTRACT: TypedContract<CamParams> = TypedContract::new();
+const FOCUS_CONTRACT: TypedContract<FocusJointsParams> = TypedContract::new();
 
 #[path = "joints_inspect.rs"]
 mod inspect;
@@ -163,6 +164,15 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&LIMITS_CONTRACT)
         .output(output_schema_for::<SolveResult>)
         .params("joint; index?: value index (default 0); min?, max? (omit both to clear)"),
+    CommandSpec::new("joint.focus", "Show Joints", crate::checked!("joint.focus", focus))
+        .icon("joint")
+        .noundo()
+        .contract(&FOCUS_CONTRACT)
+        .output(output_schema_for::<FocusJointsResult>)
+        .params(
+            "path?: [occurrence ids from the top]: show only the glyphs of the joints that attach this placement (hidden ones too), with \
+             every body outside it faded; a view, not saved or undone. Without path: back to the normal view. → joints: [ids], bodies: [names]",
+        ),
     CommandSpec::new("joint.edit", "Edit Joint", crate::checked!("joint.edit", edit))
         .icon("edit")
         .contract(&EDIT_CONTRACT)
@@ -1734,6 +1744,25 @@ fn limits(s: &mut Session, p: &Value) -> Result<Value> {
     j.values = q;
     let sol = resolve(s);
     reply(cmd, SolveResult { solved: solve_report(&sol, p), param_warnings: Vec::new() })
+}
+
+/// Show Joints on a placement, or (without `path`) back to the normal view.
+fn focus(s: &mut Session, p: &Value) -> Result<Value> {
+    let path: Vec<u64> = match p.get("path") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(value) => value
+            .as_array()
+            .filter(|a| a.len() <= 64)
+            .and_then(|a| a.iter().map(Value::as_u64).collect())
+            .ok_or_else(|| bad("joint.focus", "`path` must list at most 64 occurrence ids"))?,
+    };
+    if path.is_empty() {
+        s.set_joint_focus(None);
+        return Ok(json!({"joints": [], "bodies": []}));
+    }
+    let bodies = s.occurrence_bodies(&path, true)?;
+    s.set_joint_focus(Some(path));
+    Ok(json!({"joints": s.focused_joints().unwrap_or_default(), "bodies": bodies}))
 }
 
 fn edit(s: &mut Session, p: &Value) -> Result<Value> {

@@ -7,6 +7,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use solidcraft_engine::Session;
+use solidcraft_engine::doc::joints::AttachedJoint;
 use solidcraft_engine::doc::{Document, FeatureKind, Mat, ModelState};
 use solidcraft_engine::occurrences::OccurrencePlacement;
 
@@ -24,6 +25,8 @@ pub(super) struct Model {
     body_paths: Option<HashMap<String, Vec<u64>>>,
     /// The features that built each body, by its model name (worked out on first use, #11945).
     body_features: Option<BTreeMap<String, Vec<u64>>>,
+    /// The joints that attach each occurrence (built on first use).
+    attached_joints: Option<BTreeMap<u64, Vec<AttachedJoint>>>,
 }
 
 impl Model {
@@ -69,6 +72,7 @@ impl Model {
             children,
             placements: HashMap::new(),
             body_paths: None,
+            attached_joints: None,
             body_features: None,
         }
     }
@@ -77,6 +81,13 @@ impl Model {
     /// ([`Session::body_features`]), worked out once per model.
     pub fn body_features(&mut self, session: &Session, body: &str) -> Vec<u64> {
         self.body_features.get_or_insert_with(|| session.body_features()).get(body).cloned().unwrap_or_default()
+    }
+
+    /// The joints that attach an occurrence, worked out once per model for all of them: every
+    /// open placement row asks on every frame.
+    pub fn attached_joints(&mut self, occurrence: u64) -> &[AttachedJoint] {
+        let doc = &self.doc;
+        self.attached_joints.get_or_insert_with(|| doc.attached_joints()).get(&occurrence).map_or(&[], Vec::as_slice)
     }
 
     pub fn matches(&self, session: &Session) -> bool {

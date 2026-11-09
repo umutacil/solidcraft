@@ -4,9 +4,9 @@ use solidcraft_doc::joints::JointKind;
 
 use super::{
     AsBuiltJointParams, CamParams, CamResult, CouplingResult, CreateJointParams, DeleteJointParams, DeleteJointResult, DriveJointParams,
-    DriveJointResult, EditJointParams, GearParams, InspectJointParams, InspectJointResult, JointAddedResult, JointKindName, JointLimitsParams,
-    ListJointsParams, ListJointsResult, MakeJointOriginParams, MakeJointOriginResult, MotionLinkParams, RackPinionParams, ReachParams, ReachResult,
-    RigidGroupParams, RigidGroupResult, ScrewParams, SolveJointsParams, SolveResult,
+    DriveJointResult, EditJointParams, FocusJointsParams, FocusJointsResult, GearParams, InspectJointParams, InspectJointResult, JointAddedResult,
+    JointKindName, JointLimitsParams, ListJointsParams, ListJointsResult, MakeJointOriginParams, MakeJointOriginResult, MotionLinkParams,
+    RackPinionParams, ReachParams, ReachResult, RigidGroupParams, RigidGroupResult, ScrewParams, SolveJointsParams, SolveResult,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -37,6 +37,21 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<RackPinionParams>(), &["a", "b", "link", "quiet", "radius", "reverse"]);
     assert_keys(input_schema_for::<ScrewParams>(), &["a", "b", "joint", "link", "pitch", "quiet", "reverse"]);
     assert_keys(input_schema_for::<CamParams>(), &["a", "b", "flip", "follower", "link", "profile", "quiet", "radius", "tip"]);
+    assert_keys(input_schema_for::<FocusJointsParams>(), &["path"]);
+}
+
+/// `joint.focus` answers in the shape its output schema gives, turning the view on and off.
+#[test]
+fn focus_replies_match_the_output_schema() {
+    let schema = output_schema_for::<FocusJointsResult>();
+    let schema = schema.as_value();
+    let mut s = Session::default();
+    s.execute("component.create", &json!({"name": "A"})).unwrap_or_else(|e| panic!("{e}"));
+    s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap_or_else(|e| panic!("{e}"));
+    let on = s.execute("joint.focus", &json!({"path": [s.doc.occurrences[0].id]})).unwrap_or_else(|e| panic!("{e}"));
+    assert!(conforms(schema, schema, &on), "{on} doesn't match {schema}");
+    let off = s.execute("joint.focus", &json!({})).unwrap_or_else(|e| panic!("{e}"));
+    assert!(conforms(schema, schema, &off), "{off} doesn't match {schema}");
 }
 
 #[test]

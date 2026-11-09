@@ -478,6 +478,18 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     "history_folder_kind_icon",
                 );
             });
+            // A placement's Joints folder lists the joints crossing a subassembly's border too
+            // (#10878), in a row of its own for the same reason.
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(t.space_16, t.space_6);
+                layout_check(
+                    ui,
+                    app.tr("prefs.detailed_joint_folders"),
+                    app.tr("prefs.detailed_joint_folders_help"),
+                    &mut app.preferences.detailed_joint_folders,
+                    "detailed_joint_folders",
+                );
+            });
         });
         ui_kit::settings_section(ui, "dialogs", app.tr("prefs.dialogs"), |ui| {
             ui_kit::settings_form(ui, t.form_label_width + t.space_24, |ui| {
