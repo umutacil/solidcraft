@@ -4215,6 +4215,58 @@ fn hovering_a_picked_edge_keeps_it_lit_in_the_pick_colours() {
     }
 }
 
+/// Hovering a picked face redraws its boundary edges in hover colors and lifts its blue fill,
+/// instead of drawing nothing, so the pointer resting on a picked face is clearly visible.
+#[test]
+fn hovering_a_picked_face_lifts_its_fill_and_draws_hover_edges() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    h.frames(2);
+    let pick = crate::dialogs::face_sel(&h.app.session, Vec3::new(20.0, 15.0, 20.0)).unwrap();
+    let Sel::Face { body, index, point } = &pick else { panic!("a face, not {pick:?}") };
+    h.app.session.selection = vec![pick.clone()];
+    h.frames(2);
+
+    let t = solidcraft_theme::Tokens::get();
+    let k = t.hover_face_lift;
+    let lifted_blue = [t.sel_face.r().saturating_add(k), t.sel_face.g().saturating_add(k), t.sel_face.b().saturating_add(k), 255];
+    let hover_edge = crate::viewport::c4(t.hover_edge);
+
+    let mut drawn = |hover: Option<crate::viewport::Hit>| -> (Vec<[u8; 4]>, Vec<[u8; 4]>) {
+        h.app.viewport.hover = hover;
+        let scene = crate::viewport::build_highlight(&h.app).merged();
+        let palette = scene.palette.entries().to_vec();
+        let lines: Vec<[u8; 4]> = scene
+            .lines
+            .chunks(crate::gpu::LINE_SIZE)
+            .filter(|c| c.len() == crate::gpu::LINE_SIZE)
+            .map(|c| {
+                let idx = u32::from_le_bytes(c[24..28].try_into().unwrap());
+                palette.get(idx as usize).copied().unwrap_or([0; 4])
+            })
+            .collect();
+        let tris: Vec<[u8; 4]> = scene
+            .tris
+            .chunks(crate::gpu::TRI_SIZE)
+            .filter(|c| c.len() == crate::gpu::TRI_SIZE)
+            .map(|c| {
+                let idx = u32::from_le_bytes(c[24..28].try_into().unwrap());
+                palette.get(idx as usize).copied().unwrap_or([0; 4])
+            })
+            .collect();
+        (lines, tris)
+    };
+
+    let hover = crate::viewport::Hit::Face { body: body.clone(), index: *index, point: *point };
+    let (picked_lines, picked_tris) = drawn(None);
+    let (hovered_lines, hovered_tris) = drawn(Some(hover));
+
+    assert!(hovered_lines.len() > picked_lines.len(), "hovering the picked face lights its perimeter edges");
+    assert!(hovered_lines.contains(&hover_edge), "perimeter edges are drawn with hover_edge");
+    assert!(hovered_tris.contains(&lifted_blue), "hovered face tris contain the lifted blue fill");
+    assert!(!picked_tris.contains(&lifted_blue), "picked pass alone does not have the lifted blue");
+}
+
 /// #3683: a body or feature row lights what the Browser and timeline rows light: the body, or
 /// the feature's geometry; leaving it puts the view back.
 #[test]
