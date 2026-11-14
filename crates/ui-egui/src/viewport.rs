@@ -5530,11 +5530,12 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
                 let k = t.hover_face_lift;
                 let m = if outlines { shown(b) } else { drawn(b) };
                 let patch = m.surface_patch(*index);
-                let selected = sel.iter().any(|x| matches!(x, Sel::Face { body: b, index: i, .. } if b == body && *i == *index));
-                let c = if selected { (t.sel_face.r(), t.sel_face.g(), t.sel_face.b()) } else { body_rgb(app, body) };
+                let face_selected = |fi: usize| items.iter().any(|x| matches!(x, Sel::Face { body: b, index: i, .. } if b == body && *i == fi));
+                let selected = face_selected(*index);
                 if !(outlines && has_pickable_outline(&m)) {
                     let lit = shown(b);
                     for &f in &patch {
+                        let c = if face_selected(f) { (t.sel_face.r(), t.sel_face.g(), t.sel_face.b()) } else { body_rgb(app, body) };
                         face_tris(&mut feedback, &lit, f, [c.0.saturating_add(k), c.1.saturating_add(k), c.2.saturating_add(k), 255], true);
                     }
                 }
@@ -5542,7 +5543,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
                     if let Some(p) = m.edges.get(e)
                         && m.edge_pickable(e)
                     {
-                        let edge_sel = selected && sel.iter().any(|x| matches!(x, Sel::Edge { body: eb, index: ei, .. } if eb == body && *ei == e));
+                        let edge_sel = selected && items.iter().any(|x| matches!(x, Sel::Edge { body: eb, index: ei, .. } if eb == body && *ei == e));
                         let (cols, w) = if edge_sel { (selected_edge, 4.0) } else { (hover_edge, 1.5) };
                         edge_lines(&mut feedback, p, cols, w, &[]);
                     }
