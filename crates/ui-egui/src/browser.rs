@@ -2589,6 +2589,7 @@ fn pick_from_browser(app: &mut SolveApp, x: Sel) {
         return;
     }
     let _ = app.run("select.set", json!({ "items": [x] }));
+    crate::sketch_attachment_ui::pick(app, &x);
 }
 
 /// One item of a component folder.

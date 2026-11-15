@@ -2724,7 +2724,9 @@ impl SolveApp {
     /// planes (Mirror's plane, Offset Plane, Midplane, the construct tools)? The origin planes are
     /// shown for it, so they can be picked in the view rather than only in the browser (#2581).
     pub fn picking_plane(&self) -> bool {
-        self.picking_sketch_plane() || self.dialog.as_ref().is_some_and(|d| d.inputs.get(d.active).is_some_and(|i| i.accept & selection::PLANES != 0))
+        self.picking_sketch_plane()
+            || self.tree.redefine.is_some()
+            || self.dialog.as_ref().is_some_and(|d| d.inputs.get(d.active).is_some_and(|i| i.accept & selection::PLANES != 0))
     }
 
     /// Is the Sketch Project dialog open, picking its geometry? Its pick takes origin planes,

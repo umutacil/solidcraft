@@ -102,6 +102,41 @@ pub fn face_plane(app: &SolveApp, selection: &Sel) -> Option<Value> {
     }
 }
 
+pub(crate) fn selection_plane(app: &SolveApp, selection: &Sel) -> Option<(Value, String)> {
+    match selection {
+        Sel::Face { .. } => Some((face_plane(app, selection)?, face_label(app, selection))),
+        Sel::Plane { name } => {
+            if crate::prefs::OriginPlaneNames::PLANES.contains(&name.as_str()) {
+                Some((json!(name), app.preferences.origin_plane_names.label(name).into()))
+            } else if app.session.doc.find_feature(name).is_some_and(|f| matches!(f.kind, FeatureKind::ConstructionPlane { .. })) {
+                Some((json!(name), name.clone()))
+            } else {
+                None
+            }
+        }
+        Sel::Feature { id } => {
+            let feature = app.session.doc.feature(*id).filter(|f| matches!(f.kind, FeatureKind::ConstructionPlane { .. }))?;
+            Some((json!(feature.name), feature.name.clone()))
+        }
+        _ => None,
+    }
+}
+
+pub(crate) fn pick(app: &mut SolveApp, selection: &Sel) -> bool {
+    if app.dialog.is_some() {
+        return false;
+    }
+    let Some(sketch) = app.tree.redefine else { return false };
+    if app.session.doc.feature(sketch).is_none() {
+        return false;
+    }
+    let Some((plane, label)) = selection_plane(app, selection) else { return false };
+    let mut draft = app.tree.redefine_draft.take().filter(|draft| draft.sketch == sketch).unwrap_or_else(|| Draft::new(app, sketch));
+    draft.choose(plane, label);
+    app.tree.redefine_draft = Some(draft);
+    true
+}
+
 /// What a sketch's plane is, for the Redefine Sketch Plane panel: `XY`, a construction plane's
 /// name, or the plane it's offset from, turned from or flipped from (#5103).
 pub(crate) fn plane_description(doc: &solidcraft_engine::doc::Document, plane: &PlaneRef) -> String {
@@ -157,6 +192,7 @@ pub fn panel(app: &mut SolveApp, ctx: &egui::Context) {
     let _language = solidcraft_ui_text::scope(&app.preferences.language);
     let status = attachment(app, sketch);
     let name = app.session.doc.feature(sketch).map(|feature| feature.name.as_str()).unwrap_or("Sketch");
+    let selected_plane = app.session.selection.iter().find_map(|selection| selection_plane(app, selection));
     let selected = app.session.selection.iter().find(|selection| matches!(selection, Sel::Face { .. })).cloned();
     let mut apply = false;
     let mut cancel = false;
@@ -275,10 +311,9 @@ pub fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                             "Choose a new plane. Sketch geometry and dimensions stay unchanged in its two-dimensional coordinates.",
                         ))
                         .clicked()
-                        && let Some(selection) = &selected
-                        && let Some(plane) = face_plane(app, selection)
+                        && let Some((plane, label)) = selected_plane
                     {
-                        draft.choose(plane, face_label(app, selection));
+                        draft.choose(plane, label);
                     }
                 });
                 ui.horizontal_wrapped(|ui| {

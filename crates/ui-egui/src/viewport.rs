@@ -6369,6 +6369,7 @@ pub(crate) fn select(app: &mut SolveApp, sel: Option<Sel>, add: bool, toggle: bo
             } else {
                 let _ = app.run("select.set", json!({"items": items, "add": add}));
                 crate::browser::reveal_pick(app);
+                crate::sketch_attachment_ui::pick(app, &x);
             }
         }
         None if !add => {

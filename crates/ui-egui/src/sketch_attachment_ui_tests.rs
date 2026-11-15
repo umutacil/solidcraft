@@ -530,3 +530,34 @@ fn face_pick_makes_its_part_active_only_with_the_preference() {
         assert_eq!(h.app.session.active_component, if on { component } else { 0 }, "the part stays active as after Activate");
     }
 }
+
+#[test]
+fn redefine_picks_construction_plane_from_viewport_click() {
+    use crate::scenario;
+    let mut h = Harness::new();
+    let plane_id = h.app.run("construct.plane.offset", json!({"base": "XY", "offset": 10, "name": "Shelf"})).unwrap()["feature"].as_u64().unwrap();
+    let sketch = h.app.run("sketch.create", json!({"plane": "XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [-5, -5], "p1": [5, 5]})).unwrap();
+    h.app.finish_sketch();
+    h.call("ui.view", json!({"view": "top"}));
+    h.call("ui.view", json!({"view": "fit"}));
+    h.settle();
+
+    crate::browser::redefine_sketch(&mut h.app, sketch);
+    h.frames(5);
+    assert_eq!(scenario::count_of("dialog:ok:enabled"), Some(0.0));
+
+    h.step(&json!({"click": {"world": [0.5, 0.5, 10]}})).unwrap();
+    h.frames(3);
+    assert_eq!(h.app.session.selection, vec![solidcraft_engine::Sel::Plane { name: "Shelf".into() }]);
+    assert_eq!(crate::sketch_attachment_ui::commands(&h.app), Some(vec![("sketch.redefine".into(), json!({"sketch": sketch, "plane": "Shelf"}))]),);
+    assert_eq!(scenario::count_of("dialog:ok:enabled"), Some(1.0));
+
+    h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
+    h.frames(2);
+    assert!(h.app.tree.redefine.is_none());
+    let FeatureKind::Sketch { plane, .. } = &h.app.session.doc.feature(sketch).unwrap().kind else {
+        panic!("expected sketch feature");
+    };
+    assert_eq!(plane, &PlaneRef::Construction { feature: solidcraft_engine::doc::FeatureId(plane_id) });
+}
