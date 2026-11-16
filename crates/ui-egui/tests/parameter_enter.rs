@@ -83,6 +83,7 @@ fn parameter_enter_invalid_preserves_draft_and_other_rows() {
 #[test]
 fn parameter_enter_edits_expression_without_adding_draft() {
     let mut h = open();
+    h.app.preferences.parameters_apply_live = true;
     h.app.session.execute("parameters.add", &json!({"name":"width","expression":"10 mm"})).unwrap();
     h.frames(3);
     // A named draft with an invalid expression stays pending on focus loss.

@@ -10,7 +10,7 @@
   {"key": "A", "cmd": true},
   {"text": "100 mm"},
   {"key": "Enter"},
-  {"click": {"handle": "params:close"}},
+  {"click": {"handle": "dialog:ok"}},
   {"expect": {"param": {"width": 100}, "errors": 0}},
   {"click": {"handle": "titlebar:save"}},
   {"expect": {"file": "Sample Plate.sc"}},

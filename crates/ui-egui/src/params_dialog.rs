@@ -68,6 +68,10 @@ pub struct ParamsDialog {
     /// Measured model groups keep their scroll space without rebuilding offscreen tables.
     group_layout: Option<GroupLayout>,
     group_sizes: std::collections::HashMap<String, egui::Vec2>,
+    /// Checkpoint taken when the dialog opened, so Cancel / Close / Escape can revert any
+    /// changes made while it was open.
+    checkpoint: Option<u64>,
+    opened_doc: Option<Arc<solidcraft_engine::doc::Document>>,
     #[cfg(test)]
     groups_drawn: usize,
 }
@@ -188,10 +192,24 @@ fn show_value(r: &Row) -> String {
 
 /// Open the dialog (Change Parameters on the toolbar).
 pub fn open(app: &mut SolveApp) {
+    if let Some(mut prev) = app.params.take()
+        && let Some(cp) = prev.checkpoint.take()
+    {
+        let _ = app.run("edit.restore_checkpoint", json!({"checkpoint": cp, "forget": true}));
+    }
     let mut dialog = ParamsDialog::new();
     let unit = crate::length_input::unit(&app.session.doc);
     dialog.new_unit = UNITS.iter().position(|u| *u == unit).unwrap_or(0);
+    dialog.checkpoint = app.run("edit.checkpoint", json!({})).ok().and_then(|v| v["checkpoint"].as_u64());
+    dialog.opened_doc = Some(app.session.doc.clone());
     app.params = Some(dialog);
+}
+
+fn cancel(app: &mut SolveApp, mut d: ParamsDialog) {
+    let changed = d.opened_doc.as_ref().is_some_and(|doc| !Arc::ptr_eq(doc, &app.session.doc));
+    if let Some(cp) = d.checkpoint.take() {
+        let _ = app.run("edit.restore_checkpoint", json!({"checkpoint": cp, "forget": !changed}));
+    }
 }
 
 /// Cancel before drawing the editors: egui has already blurred the focused TextEdit on Esc,
@@ -203,8 +221,9 @@ pub(crate) fn cancel_on_escape(app: &mut SolveApp, ctx: &egui::Context) -> bool 
     ctx.input_mut(|i| {
         i.raw.events.retain(|event| !matches!(event, egui::Event::Key { key: egui::Key::Escape, modifiers, .. } if modifiers.matches_logically(egui::Modifiers::NONE)));
     });
-    // Dropping the dialog discards every draft. The regular preview update clears its scene.
-    app.params = None;
+    if let Some(d) = app.params.take() {
+        cancel(app, d);
+    }
     app.esc_handled = true;
     true
 }
@@ -389,10 +408,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             }
         }
     }
-    // Held edits (#9279) are set by Apply and OK; Cancel, the close button and Escape drop them.
+    // Held edits (#9279) are set by Apply and OK; Cancel, the close button and Escape drop them
+    // and revert any changes made while the dialog was open.
     let (closed, action) = outcome;
-    let applied = live || !matches!(action, ui_kit::Action::Ok | ui_kit::Action::Apply) || apply_held(app, &mut d, &all);
-    let close = closed || action == ui_kit::Action::Cancel || (action == ui_kit::Action::Ok && applied);
+    let cancelled = closed || action == ui_kit::Action::Cancel;
+    let applied = !cancelled && (!matches!(action, ui_kit::Action::Ok | ui_kit::Action::Apply) || apply_held(app, &mut d, &all));
+    let close = cancelled || (action == ui_kit::Action::Ok && applied);
     // Each cell owns fresh Enter from raw events. The panel itself must not submit on
     // Enter in the filter or with unrelated focus (the legacy editor left those alone), but
     // the filter, rename and comment fields still see Enter first to give up focus.
@@ -406,7 +427,13 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         let chosen = d.sort;
         ctx.data_mut(|m| m.insert_persisted(sort_id(), chosen));
     }
-    if !close {
+    if cancelled {
+        cancel(app, d);
+    } else if close {
+        if let Some(cp) = d.checkpoint.take() {
+            let _ = app.run("edit.restore_checkpoint", json!({"checkpoint": cp, "forget": true}));
+        }
+    } else {
         app.params = Some(d);
     }
 }
@@ -1322,6 +1349,7 @@ mod tests {
     #[test]
     fn escape_discards_valid_parameter_expression_and_preview() {
         let mut h = escape_dialog();
+        h.app.preferences.parameters_apply_live = true;
         let before = escape_state(&h);
         escape_type(&mut h, "param:width", "20 mm");
         h.frames(2);
@@ -1403,14 +1431,54 @@ mod tests {
     }
 
     #[test]
-    fn escape_keeps_previously_committed_parameter_edit() {
+    fn cancel_and_escape_revert_changes_made_while_dialog_was_open() {
+        let state_without_revision = |h: &crate::scenario::Harness| {
+            let mut v = escape_state(h);
+            v.as_object_mut().unwrap().remove("revision");
+            v
+        };
+        // Apply, then Cancel -> reverts to opening state.
         let mut h = escape_dialog();
+        let before = state_without_revision(&h);
         escape_type(&mut h, "param:width", "20 mm");
-        h.step(&json!({"key":"Enter"})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:Apply"}})).unwrap();
         assert_eq!(h.app.session.doc.param("width").unwrap().expr, "20 mm");
-        let before = escape_state(&h);
+        h.step(&json!({"click":{"handle":"dialog:Cancel"}})).unwrap();
+        assert!(h.app.params.is_none());
+        assert_eq!(state_without_revision(&h), before, "Cancel reverts applied edits");
+
+        // Live mode: typing + Enter, then Escape -> reverts.
+        h.step(&json!({"start":"parameters.change"})).unwrap();
+        h.frames(2);
+        h.app.preferences.parameters_apply_live = true;
+        escape_type(&mut h, "param:width", "25 mm");
+        h.step(&json!({"key":"Enter"})).unwrap();
+        assert_eq!(h.app.session.doc.param("width").unwrap().expr, "25 mm");
         escape_type(&mut h, "param:width", "30 mm");
-        escape_closed(&mut h, &before, "20 mm");
+        escape_key(&mut h, true);
+        assert!(h.app.params.is_none());
+        assert_eq!(state_without_revision(&h), before, "Escape reverts live edits");
+        escape_key(&mut h, false);
+
+        // Live mode: typing in a field and clicking Cancel directly (lost_focus fires on the same frame) -> reverts.
+        h.step(&json!({"start":"parameters.change"})).unwrap();
+        h.frames(2);
+        escape_type(&mut h, "param:width", "40 mm");
+        h.step(&json!({"click":{"handle":"dialog:Cancel"}})).unwrap();
+        assert!(h.app.params.is_none());
+        assert_eq!(state_without_revision(&h), before, "Cancel while focused in live mode still reverts");
+
+        // Reopening after OK keeps the accepted edit on a subsequent Escape.
+        h.step(&json!({"start":"parameters.change"})).unwrap();
+        h.frames(2);
+        escape_type(&mut h, "param:width", "20 mm");
+        h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();
+        assert_eq!(h.app.session.doc.param("width").unwrap().expr, "20 mm");
+        let after_ok = escape_state(&h);
+        h.step(&json!({"start":"parameters.change"})).unwrap();
+        h.frames(2);
+        escape_type(&mut h, "param:width", "30 mm");
+        escape_closed(&mut h, &after_ok, "20 mm");
     }
 
     #[test]
@@ -1525,7 +1593,7 @@ mod tests {
     #[test]
     fn the_apply_live_choice_is_remembered_and_turning_it_on_applies_what_waits() {
         crate::i18n::install();
-        assert!(crate::prefs::Prefs::default().parameters_apply_live, "live updates stay the default");
+        assert!(!crate::prefs::Prefs::default().parameters_apply_live, "held updates are the default");
         // The hint above the check box says when edits apply, whichever way it is set.
         assert_eq!(hint(true), solidcraft_ui_text::tr("manage.parameters_hint"));
         assert_ne!(hint(false), hint(true));
@@ -1536,12 +1604,12 @@ mod tests {
         assert!(h.app.preferences.parameters_apply_live);
         assert_eq!(expression(&h, "w"), "30 mm");
         assert!(h.app.params.as_ref().unwrap().editing.is_empty());
+        let saved = h.app.prefs();
         h.step(&json!({"click":{"handle":"params:apply_live"}})).unwrap();
         assert!(!h.app.preferences.parameters_apply_live);
-        let saved = h.app.prefs();
         let mut other = crate::scenario::Harness::new();
         other.app.load_prefs(&saved);
-        assert!(!other.app.preferences.parameters_apply_live, "the choice persists with the preferences");
+        assert!(other.app.preferences.parameters_apply_live, "the choice persists with the preferences");
     }
 
     #[test]
@@ -2142,6 +2210,7 @@ mod tests {
         h.step(&json!({"key":"A","cmd":true})).unwrap();
         h.step(&json!({"text":"900 mm"})).unwrap();
         h.step(&json!({"key":"Enter"})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:Apply"}})).unwrap();
         h.settle();
         let value = |h: &crate::scenario::Harness| {
             h.app.params.as_ref().unwrap().listed.as_ref().unwrap().1.iter().find(|r| r.name == last).unwrap().value.unwrap()
@@ -2325,7 +2394,7 @@ mod tests {
 
         // The open field wraps, so the end of the text is Command+Down. Not Ctrl+End:
         // egui ignores that on macOS, and the typed tail would land where the click put the cursor.
-        h.run(&json!([{"key":"ArrowDown","cmd":true,"ctrl":false}, {"text":" * 2"}, {"key":"Enter"}])).unwrap();
+        h.run(&json!([{"key":"ArrowDown","cmd":true,"ctrl":false}, {"text":" * 2"}, {"key":"Enter"}, {"click":{"handle":"dialog:Apply"}}])).unwrap();
         h.frames(2);
         assert_eq!(h.app.session.doc.param("length").unwrap().expr, format!("{long} * 2"));
         let after = crate::scenario::rect_of("param:length").unwrap();

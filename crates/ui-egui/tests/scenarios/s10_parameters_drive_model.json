@@ -87,6 +87,9 @@
   "key": "Enter"
  },
  {
+  "click": {"handle": "dialog:ok"}
+ },
+ {
   "debug": 1
  },
  {
@@ -95,14 +98,7 @@
     "d1": 55
    },
    "volume": 16500,
-   "errors": 0
-  }
- },
- {
-  "click": {"handle": "params:close"}
- },
- {
-  "expect": {
+   "errors": 0,
    "dialog": null
   }
  },

@@ -318,6 +318,7 @@ fn parameter_expressions_step_and_apply() {
     h.frames(2);
     assert_eq!(h.app.params.as_ref().unwrap().editing.get("width").map(String::as_str), Some("12 mm"));
     h.step(&json!({"key": "Enter"})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:Apply"}})).unwrap();
     h.frames(2);
     assert_eq!(h.app.session.doc.param("width").map(|p| p.expr.as_str()), Some("12 mm"));
 }
